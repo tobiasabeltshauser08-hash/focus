@@ -1,0 +1,8 @@
+{
+  "name": "focus",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/test.js"
+  }
+}
