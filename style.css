@@ -180,3 +180,28 @@ textarea { width: 100%; min-height: 90px; resize: vertical; border: 1px solid va
 @keyframes blink { 50% { opacity: .25; } }
 @keyframes up { from { transform: translateY(40px); opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ---------- Android-App: App-Sperre ---------- */
+.pin-card.warn { border-color: var(--warn); }
+.pin-card.warn small { color: var(--warn); }
+.app-list { display: grid; gap: 6px; }
+.app-row { display: grid; grid-template-columns: 36px 1fr auto; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; cursor: pointer; }
+.app-row img, .app-row > span:first-child { width: 36px; height: 36px; border-radius: 9px; }
+.app-row small { display: block; color: var(--muted); font-size: .78rem; }
+.app-row.never { opacity: .55; cursor: default; }
+.app-row input { width: 44px; height: 26px; appearance: none; border-radius: 999px; background: var(--surface-2); position: relative; cursor: pointer; transition: background .15s; }
+.app-row input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgb(0 0 0 / .3); transition: transform .15s; }
+.app-row input:checked { background: var(--ink); }
+.app-row input:checked::after { transform: translateX(18px); }
+.perm-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.perm { display: grid; grid-template-columns: 30px 1fr; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; }
+.perm.cur { border-color: var(--ink); }
+.perm .mark { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; font-weight: 700; color: #fff; }
+.perm.ok .mark { background: var(--ok); border-color: var(--ok); }
+.perm b { display: block; font-weight: 600; margin-bottom: 2px; }
+.perm .opt { font-weight: 500; color: var(--muted); font-size: .78rem; }
+.perm .btn { margin-top: 10px; }
+.perm .how { margin: 8px 0 0; font-size: .85rem; }
+.perm .state { margin: 6px 0 0; color: var(--ok); font-weight: 600; font-size: .88rem; }
+.lock-info { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.lock-info svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }

@@ -3,6 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/test.js"
+    "test": "node tests/test.js && node tests/blocker.test.js",
+    "android:sync": "node scripts/build-web.mjs && npx cap sync android",
+    "android:build": "npm run android:sync && cd android && ./gradlew assembleDebug && mkdir -p ../dist && cp app/build/outputs/apk/debug/app-debug.apk ../dist/focus-debug.apk"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/core": "^8.6.0"
   }
 }

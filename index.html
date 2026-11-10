@@ -24,12 +24,14 @@
   <main id="session" class="session" hidden></main>
   <main id="summary" class="page" hidden></main>
   <main id="detail" class="page" hidden></main>
+  <main id="perms" class="page" hidden></main>
   <div id="sheet" class="sheet" hidden></div>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script type="module" src="js/app.js"></script>
   <script>
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+    // In der Android-App liegen die Dateien schon im Gerät, dort braucht es keinen Service Worker
+    if ("serviceWorker" in navigator && !window.Capacitor?.isNativePlatform?.()) navigator.serviceWorker.register("sw.js").catch(() => {});
   </script>
 </body>
 </html>

@@ -1,0 +1,8 @@
+{
+  "appId": "app.focus.study",
+  "appName": "Focus",
+  "webDir": "www",
+  "android": {
+    "minWebViewVersion": 100
+  }
+}

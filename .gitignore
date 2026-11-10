@@ -1,0 +1,8 @@
+# Android-App (Capacitor): Abhängigkeiten und Build-Ausgaben
+node_modules/
+www/
+dist/
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties

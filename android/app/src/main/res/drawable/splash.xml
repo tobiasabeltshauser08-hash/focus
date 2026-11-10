@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Startbildschirm: schwarz mit Focus-Emblem in der Mitte -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@android:color/black" />
+    <item android:drawable="@drawable/ic_focus_foreground" android:gravity="center" android:width="160dp" android:height="160dp" />
+</layer-list>

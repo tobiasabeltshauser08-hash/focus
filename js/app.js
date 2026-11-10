@@ -1,6 +1,8 @@
 import * as db from "./db.js";
 import { Recorder, FramePlayer, exportTimelapse, thumbnail, extOf } from "./recorder.js";
 import { SUBJECTS, DURATIONS, TL_FPS, timelapseInterval, fmtClock, fmtDur, fmtBytes, summary } from "./stats.js";
+import { isNative, Blocker } from "./native.js";
+import { selection, blockable, appsText, remainText, PERM_STEPS, missingForBlock } from "./blocker.js";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -25,7 +27,18 @@ const prefs = { min: 45, subject: SUBJECTS[0], mode: "timelapse", audio: false, 
 try { Object.assign(prefs, JSON.parse(localStorage.getItem(PREFS_KEY)) || {}); } catch (e) {}
 const savePrefs = () => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) {} };
 
-const VIEWS = ["home", "setup", "session", "summary", "detail"];
+// ---------- Android-App: App-Sperre (nur wenn nativ) ----------
+const NATIVE = isNative();
+const NATIVE_KEY = "focus-native";
+const nat = { setupDone: false, blocked: null };  // blocked: gespeicherte Paketliste oder null = Standard
+try { Object.assign(nat, JSON.parse(localStorage.getItem(NATIVE_KEY)) || {}); } catch (e) {}
+const saveNat = () => { try { localStorage.setItem(NATIVE_KEY, JSON.stringify(nat)); } catch (e) {} };
+let nativeApps = null, perms = {};
+const loadApps = () => nativeApps ? Promise.resolve(nativeApps) : Blocker.apps().then(a => (nativeApps = a.sort((x, y) => x.label.localeCompare(y.label, "de"))));
+const blockedPkgs = () => nativeApps ? selection(nativeApps, nat.blocked) : [];
+const refreshPerms = async () => { try { perms = await Blocker.permissions(); } catch (e) { perms = {}; } return perms; };
+
+const VIEWS = ["home", "setup", "session", "summary", "detail", "perms"];
 function show(v) { VIEWS.forEach(x => { $("#" + x).hidden = x !== v; }); window.scrollTo(0, 0); }
 
 let toastT = 0;
@@ -90,7 +103,7 @@ async function renderHome() {
       <div class="bars-cap"><span>Letzte 7 Tage</span><span>${fmtDur(st.last7.reduce((a, d) => a + d.sec, 0))}</span></div>
     </section>
     <button type="button" class="btn-big" data-a="setup"><span class="dot"></span>Focus-Session starten</button>
-    <button type="button" class="pin-card" data-a="pin"><span class="ic">${ICON.lock}</span><span><b>Handy während der Session sperren</b><small>Mit „App anheften“ kommst du nur mit deiner PIN raus</small></span></button>
+    ${NATIVE ? blockCard("Während der Session gesperrt") : `<button type="button" class="pin-card" data-a="pin"><span class="ic">${ICON.lock}</span><span><b>Handy während der Session sperren</b><small>Mit „App anheften“ kommst du nur mit deiner PIN raus</small></span></button>`}
     <section>
       <div class="sec-h"><h2>Deine Sessions</h2><span>${st.count} gesamt</span></div>
       ${list.length ? `<div class="list">${list.map(sessionCard).join("")}</div>` : `<div class="empty">Noch keine Session. Starte deine erste, dann erscheint sie hier mit Aufnahme.</div>`}
@@ -114,6 +127,84 @@ $("#home").addEventListener("click", e => {
   if (b.dataset.open) return openDetail(b.dataset.open);
   if (b.dataset.a === "setup") openSetup();
   if (b.dataset.a === "pin") openPinGuide();
+  if (b.dataset.a === "block") openBlockList();
+  if (b.dataset.a === "perms") renderPerms();
+});
+
+// ---------- App-Sperre (Android): Karte, Sperrliste, Berechtigungs-Assistent ----------
+function blockCard(title) {
+  const missing = missingForBlock(perms);
+  const sub = missing.length ? "Berechtigung fehlt – tippen zum Einrichten"
+    : nativeApps ? `${appsText(blockedPkgs().length)}: ${blockedNames()}` : "Apps werden geladen …";
+  return `<button type="button" class="pin-card${missing.length ? " warn" : ""}" data-a="${missing.length ? "perms" : "block"}" id="block-card"><span class="ic">${ICON.lock}</span><span><b>${title}</b><small>${esc(sub)}</small></span></button>`;
+}
+function blockedNames() {
+  const sel = blockedPkgs(), names = nativeApps.filter(a => sel.includes(a.pkg)).map(a => a.label);
+  if (!names.length) return "keine – tippen zum Auswählen";
+  return names.length > 3 ? `${names.slice(0, 3).join(", ")} …` : names.join(", ");
+}
+const updateBlockCard = () => { const c = $("#block-card"); if (c) c.outerHTML = blockCard(c.querySelector("b").textContent); };
+
+async function openBlockList() {
+  $("#sheet").innerHTML = `<div class="sheet-in" role="dialog" aria-modal="true" aria-label="Gesperrte Apps"><div class="grab"></div>
+    <h2>Während der Session gesperrt</h2>
+    <p class="hint">Gesperrte Apps zeigen während der Session einen Sperrbildschirm. Alles andere bleibt nutzbar: Telefon, Wecker, Musik, Nachrichten.</p>
+    <div class="app-list" id="app-list"><p class="hint">Apps werden geladen …</p></div>
+    <div class="btns"><button type="button" class="btn sec" data-a="block-default">Standard</button><button type="button" class="btn sec" data-a="perms">Berechtigungen</button></div>
+    <button type="button" class="btn block" data-a="close">Fertig</button></div>`;
+  $("#sheet").hidden = false;
+  try { await loadApps(); } catch (e) { $("#app-list").innerHTML = `<p class="hint">Die App-Liste konnte nicht geladen werden.</p>`; return; }
+  renderAppList();
+}
+function renderAppList() {
+  const el = $("#app-list");
+  if (!el) return;
+  const sel = blockedPkgs();
+  const row = a => `<label class="app-row${blockable(a) ? "" : " never"}">${a.icon ? `<img src="${a.icon}" alt="">` : "<span></span>"}<span>${esc(a.label)}${blockable(a) ? "" : "<small>nie gesperrt</small>"}</span>
+    <input type="checkbox" data-pkg="${esc(a.pkg)}"${sel.includes(a.pkg) ? " checked" : ""}${blockable(a) ? "" : " disabled"} aria-label="${esc(a.label)} sperren"></label>`;
+  // gesperrte zuerst, dann alphabetisch; nie sperrbare ans Ende
+  const order = a => (blockable(a) ? 0 : 2) + (sel.includes(a.pkg) ? 0 : 1);
+  el.innerHTML = [...nativeApps].sort((x, y) => order(x) - order(y)).map(row).join("");
+}
+$("#sheet").addEventListener("change", e => {
+  const pkg = e.target.dataset?.pkg;
+  if (!pkg) return;
+  const sel = new Set(blockedPkgs());
+  e.target.checked ? sel.add(pkg) : sel.delete(pkg);
+  nat.blocked = [...sel]; saveNat(); updateBlockCard();
+});
+$("#sheet").addEventListener("click", e => {
+  const a = e.target.closest("[data-a]")?.dataset.a;
+  if (a === "block-default") { nat.blocked = null; saveNat(); renderAppList(); updateBlockCard(); }
+  if (a === "perms") { $("#sheet").hidden = true; $("#sheet").innerHTML = ""; renderPerms(); }
+});
+
+// Einmaliger, geführter Berechtigungs-Assistent (danach nur über die Sperr-Karte erreichbar)
+async function renderPerms() {
+  show("perms");
+  await refreshPerms();
+  const first = PERM_STEPS.find(s => !perms[s.key]);
+  $("#perms").innerHTML = `
+    <div class="top">${nat.setupDone ? `<button type="button" class="icon-btn" data-a="perm-done" aria-label="Zurück">${ICON.back}</button>` : ""}<div><h1 class="h-title">Einrichten</h1><p class="top-sub">Einmalig, dann nie wieder</p></div></div>
+    <p class="hint">Focus sperrt während einer Session nur die Apps, die dich ablenken. Dafür braucht die App ein paar Berechtigungen. Tippe der Reihe nach auf die Knöpfe und komm danach hierher zurück.</p>
+    <ol class="perm-list">${PERM_STEPS.map(s => {
+      const ok = !!perms[s.key], cur = s === first;
+      return `<li class="perm${ok ? " ok" : ""}${cur ? " cur" : ""}"><span class="mark" aria-hidden="true">${ok ? "✓" : ""}</span><div>
+        <b>${s.title}${s.need ? "" : ' <small class="opt">optional</small>'}</b><p class="hint">${s.why}</p>
+        ${ok ? '<p class="state">Erlaubt</p>' : `${cur && s.how ? `<p class="how">${s.how}</p>` : ""}<button type="button" class="btn${cur ? "" : " sec"}" data-perm="${s.key}">${s.btn}</button>`}</div></li>`;
+    }).join("")}</ol>
+    ${missingForBlock(perms).length ? '<p class="note">Ohne Nutzungszugriff und „Über anderen Apps anzeigen“ kann Focus keine Apps sperren. Timer und Kamera funktionieren trotzdem.</p>' : '<p class="note">Alles bereit: Während einer Session sind deine Ablenkungs-Apps gesperrt.</p>'}
+    <button type="button" class="btn-big" data-a="perm-done">${missingForBlock(perms).length ? "Später" : "Fertig"}</button>`;
+}
+$("#perms").addEventListener("click", async e => {
+  const key = e.target.closest("[data-perm]")?.dataset.perm;
+  if (key) {
+    try { await Blocker.request(key); } catch (err) { toast("Die Einstellung ließ sich nicht öffnen."); }
+    // Laufzeit-Dialoge (Kamera, Benachrichtigungen) sind hier schon beantwortet; Systemseiten prüfen wir beim Zurückkommen
+    if (key === "camera" || key === "notifications") renderPerms();
+    return;
+  }
+  if (e.target.closest("[data-a=perm-done]")) { nat.setupDone = true; saveNat(); renderHome(); }
 });
 
 // ---------- Anleitung: App anheften (Android) ----------
@@ -158,7 +249,7 @@ function renderSetup() {
     <div class="field"><span>Aufnahme</span><div class="seg">${Object.entries(MODES).map(([k, [t, d]]) => r("mode", k, t, `<small>${d}</small>`)).join("")}</div>
       <p class="hint" id="mode-info">${modeInfo()}</p></div>
     ${prefs.mode === "video" ? `<label class="switch" for="audio"><span>Ton mit aufnehmen</span><input type="checkbox" id="audio"${prefs.audio ? " checked" : ""}></label>` : ""}
-    <button type="button" class="pin-card" data-a="pin"><span class="ic">${ICON.lock}</span><span><b>Vorher: Handy sperren</b><small>Nach dem Start Focus anheften, so geht's</small></span></button>
+    ${NATIVE ? blockCard("Diese Apps werden gesperrt") : `<button type="button" class="pin-card" data-a="pin"><span class="ic">${ICON.lock}</span><span><b>Vorher: Handy sperren</b><small>Nach dem Start Focus anheften, so geht's</small></span></button>`}
     <div class="sticky-go"><button type="button" class="btn-big" data-a="start"><span class="dot"></span>Session starten · ${fmtDur(prefs.min * 60)}</button></div>`;
 }
 
@@ -198,6 +289,8 @@ $("#setup").addEventListener("click", e => {
   if (!a) return;
   if (a === "home") { stopStream(); renderHome(); }
   if (a === "pin") openPinGuide();
+  if (a === "block") openBlockList();
+  if (a === "perms") { stopStream(); renderPerms(); }
   if (a === "minus" || a === "plus") {
     prefs.min = Math.min(240, Math.max(5, prefs.min + (a === "plus" ? 5 : -5))); savePrefs(); renderSetup(); reattachPreview();
   }
@@ -227,7 +320,8 @@ async function startSession() {
   await db.put("sessions", s);
   try { await navigator.storage?.persist?.(); } catch (e) {}
 
-  RS = { s, recOn: prefs.mode !== "none", ended: false, hiddenAt: 0, lastSave: 0 };
+  RS = { s, recOn: prefs.mode !== "none", ended: false, hiddenAt: 0, lastSave: 0, blocked: 0 };
+  if (NATIVE) await startBlocking(s);
   show("session");
   renderSession();
   const v = $("#session video");
@@ -245,8 +339,25 @@ async function startSession() {
   tick();
 }
 
+// Android: Sperre für die Dauer der Session starten. Fehlen Berechtigungen, läuft die Session ohne Sperre.
+async function startBlocking(s) {
+  try {
+    await loadApps();
+    const pkgs = blockedPkgs();
+    if (!pkgs.length) return;
+    const r = await Blocker.start(s.start + s.plannedSec * 1000, pkgs);
+    perms = r;
+    if (r.started) RS.blocked = r.count;
+    else toast("App-Sperre aus: Berechtigung fehlt. Einrichten über „Während der Session gesperrt“.");
+  } catch (e) { toast("App-Sperre konnte nicht gestartet werden, der Timer läuft trotzdem."); }
+}
+const stopBlocking = () => { if (NATIVE) Blocker.stop().catch(() => {}); };
+
 function renderSession() {
   const { s } = RS;
+  const lockInfo = NATIVE
+    ? `<span class="lock-info">${RS.blocked ? `${ICON.lock}${appsText(RS.blocked)} gesperrt` : "Keine App gesperrt"}</span>`
+    : '<button type="button" data-a="pin">Handy sperren</button>';
   $("#session").innerHTML = `
     <div class="ss-top">
       <span class="recdot${RS.recOn ? "" : " off"}" id="recdot"><i></i>${s.mode === "none" ? "Ohne Kamera" : MODES[s.mode][0]}</span>
@@ -260,11 +371,11 @@ function renderSession() {
         <text x="60" y="58" class="t" id="left">${fmtClock(s.plannedSec)}</text>
         <text x="60" y="76" class="s">verbleibend</text>
       </svg>
-      ${s.mode !== "none" ? `<div class="cam" id="cam">${videoEl()}</div>` : ""}
+      ${s.mode !== "none" && !RS.resumed ? `<div class="cam" id="cam">${videoEl()}</div>` : ""}
       <div class="away" id="away" hidden></div>
     </div>
     <div class="ss-bottom">
-      <div class="ss-links">${s.mode !== "none" ? '<button type="button" data-a="cam">Vorschau ausblenden</button>' : ""}<button type="button" data-a="pin">Handy sperren</button></div>
+      <div class="ss-links">${s.mode !== "none" && !RS.resumed ? '<button type="button" data-a="cam">Vorschau ausblenden</button>' : ""}${lockInfo}</div>
       <button type="button" class="hold" id="hold"><i></i><span>Gedrückt halten zum Beenden</span></button>
     </div>`;
 }
@@ -298,6 +409,7 @@ async function finishSession(completed) {
   await db.put("sessions", s);
   stopStream();
   releaseWake();
+  stopBlocking();
   if (completed) { [0, .35, .7].forEach(t => beep(990, .25, t)); vibrate([300, 150, 300, 150, 300]); }
   const done = RS.s;
   RS = null;
@@ -337,9 +449,19 @@ $("#session").addEventListener("click", e => {
 });
 
 // App verlassen = Ablenkung
-document.addEventListener("visibilitychange", () => {
+document.addEventListener("visibilitychange", async () => {
+  // Android: nach Rückkehr aus den Systemeinstellungen den Assistenten aktualisieren
+  if (NATIVE && !document.hidden && !$("#perms").hidden) return renderPerms();
+  if (NATIVE && !document.hidden && !$("#home").hidden) { await refreshPerms(); updateBlockCard(); }
   if (!RS || RS.ended) return;
   if (document.hidden) { RS.hiddenAt = Date.now(); RS.rec?.pause(); return; }
+  // Android: Session wurde am Sperrbildschirm per „Session beenden“ abgebrochen
+  if (NATIVE) {
+    try {
+      const st = await Blocker.status();
+      if (st.abortedAt) { await Blocker.clearAborted(); return finishSession(false); }
+    } catch (e) {}
+  }
   const away = RS.hiddenAt ? (Date.now() - RS.hiddenAt) / 1000 : 0;
   RS.hiddenAt = 0;
   RS.rec?.resume();
@@ -488,7 +610,35 @@ $("#detail").addEventListener("click", async e => {
 
 // ---------- Start ----------
 // Sessions, die durch Absturz oder Schließen nicht beendet wurden, als unterbrochen markieren
+// Android: Lief die Sperre noch (Focus wurde weggewischt), geht die Session ohne Kamera weiter.
 (async () => {
-  for (const s of await db.all("sessions")) if (s.status === "running") { s.status = "early"; await db.put("sessions", s); }
+  let st = null;
+  if (NATIVE) { try { st = await Blocker.status(); } catch (e) {} }
+  for (const s of await db.all("sessions")) {
+    if (s.status !== "running") continue;
+    const end = s.start + s.plannedSec * 1000;
+    if (st?.active && Math.abs(st.until - end) < 5000 && end > Date.now()) { resumeSession(s); continue; }
+    if (st?.abortedAt) await Blocker.clearAborted().catch(() => {});
+    s.status = "early";
+    s.actualSec = Math.min(s.plannedSec, Math.max(s.actualSec || 0, Math.round(((st?.abortedAt || 0) - s.start) / 1000)));
+    await db.put("sessions", s);
+  }
+  if (RS) return;
+  if (NATIVE) {
+    await refreshPerms();
+    loadApps().then(updateBlockCard).catch(() => {});
+    if (!nat.setupDone) return renderPerms();
+  }
   renderHome();
 })();
+
+function resumeSession(s) {
+  RS = { s, recOn: false, ended: false, hiddenAt: 0, lastSave: 0, resumed: true, blocked: 0 };
+  show("session");
+  renderSession();
+  $("#recdot").lastChild.textContent = "Aufnahme beendet";
+  loadApps().then(() => { RS && (RS.blocked = blockedPkgs().length); const li = $(".lock-info"); if (li && RS) li.innerHTML = `${ICON.lock}${appsText(RS.blocked)} gesperrt`; }).catch(() => {});
+  requestWake();
+  RS.timer = setInterval(tick, 500);
+  tick();
+}

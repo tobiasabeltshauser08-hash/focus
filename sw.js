@@ -1,9 +1,9 @@
 // Service Worker: speichert die App, damit sie auch offline läuft.
 // Nach Änderungen an den Dateien die Versionsnummer erhöhen.
-const CACHE = 'focus-v1';
+const CACHE = 'focus-v2';
 const FILES = [
   './', 'index.html', 'style.css', 'manifest.webmanifest',
-  'js/app.js', 'js/db.js', 'js/recorder.js', 'js/stats.js',
+  'js/app.js', 'js/db.js', 'js/recorder.js', 'js/stats.js', 'js/native.js', 'js/blocker.js',
   'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
 ];
 const FONTS = 'focus-fonts';
